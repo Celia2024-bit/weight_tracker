@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Keep Fit — Weight Tracker</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          colors: { brand: { 400: '#34d399', 500: '#10b981', 600: '#059669' } },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="gradient-bg min-h-full text-slate-800 dark:text-slate-100 transition-colors duration-300">
+
+  <div class="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+
+    <header class="mb-8 flex items-start justify-between gap-4">
+      <div>
+        <p class="text-sm font-medium text-brand-600 dark:text-brand-400 tracking-wide uppercase">Personal Tracker</p>
+        <h1 class="mt-1 text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Keep Fit</h1>
+        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Weight, meals &amp; trends · offline · private</p>
+      </div>
+      
+      <div class="flex items-center gap-2">
+        <div class="flex gap-1">
+          <button id="btnExport" title="Export data to local JSON file" class="text-xs bg-white/60 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-brand-500 hover:text-white transition-all">📤 Export</button>
+          <button id="btnImport" title="Import data from local JSON file" class="text-xs bg-white/60 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-brand-500 hover:text-white transition-all">📥 Import</button>
+          <input type="file" id="fileImportSelector" accept=".json" class="hidden" />
+        </div>
+
+        <button id="themeToggle" type="button" aria-label="Toggle dark mode" class="glass rounded-xl p-2.5 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60 hover:ring-brand-500/40 transition-all">
+          <svg id="iconSun" class="h-5 w-5 text-amber-500 hidden dark:block" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"/></svg>
+          <svg id="iconMoon" class="h-5 w-5 text-slate-600 dark:hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="glass mb-6 rounded-2xl p-4 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">⚙️</span>
+        <div>
+          <h3 class="text-sm font-semibold text-slate-900 dark:text-white">Profile Settings</h3>
+          <p class="text-xs text-slate-400">Set your height for auto BMI calculations</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <label for="userHeight" class="text-xs font-medium text-slate-500 dark:text-slate-400">Height (cm):</label>
+        <input id="userHeight" type="number" step="0.1" placeholder="e.g. 170" class="w-24 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-semibold text-center focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+      </div>
+    </section>
+
+    <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="stat-card glass rounded-2xl p-4 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400">Latest</p>
+        <p id="statLatest" class="mt-1 text-2xl font-bold text-slate-900 dark:text-white">—</p>
+        <p id="statLatestMeta" class="text-xs text-slate-400"></p>
+      </div>
+      <div class="stat-card glass rounded-2xl p-4 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400">BMI</p>
+        <p id="statBmi" class="mt-1 text-2xl font-bold text-slate-900 dark:text-white">—</p>
+        <p id="statBmiLabel" class="text-xs text-slate-400"></p>
+      </div>
+      <div class="stat-card glass rounded-2xl p-4 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400">7-day avg</p>
+        <p id="statAvg" class="mt-1 text-2xl font-bold text-slate-900 dark:text-white">—</p>
+        <p class="text-xs text-slate-400">rolling average</p>
+      </div>
+      <div class="stat-card glass rounded-2xl p-4 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400">Change</p>
+        <p id="statChange" class="mt-1 text-2xl font-bold text-slate-900 dark:text-white">—</p>
+        <p class="text-xs text-slate-400">vs first entry</p>
+      </div>
+    </div>
+
+    <section class="glass mb-6 rounded-2xl p-6 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+      <h2 class="mb-4 text-base font-semibold text-slate-900 dark:text-white">Log Weight</h2>
+      <form id="logForm" class="space-y-4">
+        <div class="grid gap-4 sm:grid-cols-3">
+          <div>
+            <label for="entryDate" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Date</label>
+            <input id="entryDate" type="date" required class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+          </div>
+          <div>
+            <label for="entryTime" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Time</label>
+            <input id="entryTime" type="time" required class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+          </div>
+          <div>
+            <label for="weight" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Weight (kg)</label>
+            <input id="weight" type="number" step="0.01" min="0" required placeholder="e.g. 68.55" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm font-semibold focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+          </div>
+        </div>
+
+        <div>
+          <p class="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">What I ate</p>
+          <div class="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label for="breakfast" class="mb-1 block text-xs text-slate-400">Breakfast</label>
+              <input id="breakfast" type="text" placeholder="e.g. oatmeal, egg" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+            </div>
+            <div>
+              <label for="lunch" class="mb-1 block text-xs text-slate-400">Lunch</label>
+              <input id="lunch" type="text" placeholder="e.g. salad, chicken" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+            </div>
+            <div>
+              <label for="dinner" class="mb-1 block text-xs text-slate-400">Dinner</label>
+              <input id="dinner" type="text" placeholder="e.g. rice, fish" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end">
+          <button type="submit" class="rounded-xl bg-gradient-to-r from-brand-500 to-emerald-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40 hover:from-brand-600 hover:to-emerald-700 transition-all active:scale-95">Save Entry</button>
+        </div>
+        <p id="formError" class="hidden text-sm text-red-500"></p>
+        <p id="formSuccess" class="hidden text-sm text-brand-600 dark:text-brand-400"></p>
+      </form>
+    </section>
+
+    <section class="glass mb-6 rounded-2xl p-6 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-base font-semibold text-slate-900 dark:text-white">Weight Trend</h2>
+        <div class="flex gap-1.5">
+          <button data-range="7" class="range-btn rounded-lg px-3 py-1 text-xs font-medium bg-brand-500 text-white">7d</button>
+          <button data-range="30" class="range-btn rounded-lg px-3 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">30d</button>
+          <button data-range="all" class="range-btn rounded-lg px-3 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">All</button>
+        </div>
+      </div>
+      <div class="relative h-64 sm:h-72">
+        <canvas id="weightChart"></canvas>
+        <div id="chartEmpty" class="absolute inset-0 flex items-center justify-center text-sm text-slate-400 hidden">No data yet — log your first weight above.</div>
+      </div>
+    </section>
+
+    <section class="glass rounded-2xl p-6 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+      <h2 class="mb-4 text-base font-semibold text-slate-900 dark:text-white">History</h2>
+      <ul id="historyList" class="divide-y divide-slate-100 dark:divide-slate-700/60"></ul>
+      <p id="historyEmpty" class="py-6 text-center text-sm text-slate-400">No entries recorded.</p>
+    </section>
+
+    <footer class="mt-8 text-center text-xs text-slate-400 dark:text-slate-500">Data stored securely and locally in your browser · Offline Ready</footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
