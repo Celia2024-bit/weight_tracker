@@ -3,14 +3,16 @@ const STORAGE_KEY = 'keepfit-weight-v2';
 const HEIGHT_KEY = 'keepfit-user-height';
 
 // 🔌 后端 API 配置：本地测试用 localhost，发布到 Render 后记得改成你的 Render 域名
-// const API_BASE = 'http://localhost:5000/api/weight'; 
-const API_BASE = 'https://backend-all-6q0a.onrender.com/api/weight';
-
+//const API_ROOT = 'http://localhost:5000/api';
+const API_ROOT = 'https://backend-all-6q0a.onrender.com/api';
+const WEIGHT_API = `${API_ROOT}/weight`;
+const WAIST_API = `${API_ROOT}/waist`;
 const USERNAME = 'default_user'; // 你的专属同步账号名
 
 let entries = [];
 let currentHeight = 170; // 默认身高 (cm)
 let chartInstance = null;
+let waistChartInstance = null;
 let activeRange = 7;
 
 // 早晚图标与主题配色映射
@@ -31,108 +33,166 @@ function derivePeriod(time) {
 function buildTimestamp(date, time) { return new Date(date + 'T' + time + ':00').toISOString(); }
 function formatWeight(w) { return (Math.round(w * 100) / 100).toFixed(2); }
 
-function mealSummary(meals) {
-  const parts = [];
-  if (meals?.breakfast) parts.push('B: ' + meals.breakfast);
-  if (meals?.lunch) parts.push('L: ' + meals.lunch);
-  if (meals?.dinner) parts.push('D: ' + meals.dinner);
-  return parts.length ? parts.join(' · ') : 'No meals recorded';
+function parseWeight(value) {
+  if (value == null || value === '') return null;
+  const parsed = Math.round(parseFloat(value) * 100) / 100;
+  return !isNaN(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseWaistSize(value) {
+  if (value == null || value === '') return null;
+  const parsed = Math.round(parseFloat(value) * 10) / 10;
+  return !isNaN(parsed) && parsed > 0 ? parsed : null;
+}
+
+function inferEntryType(e) {
+  if (e.entryType === 'weight' || e.entryType === 'waist') return e.entryType;
+  const waist = parseWaistSize(e.waistSize);
+  const weight = parseWeight(e.weight);
+  if (waist != null && weight == null) return 'waist';
+  return 'weight';
 }
 
 function normalizeEntry(e) {
   const date = e.date || (e.timestamp ? e.timestamp.slice(0, 10) : todayISO());
   const time = e.time || (e.timestamp ? new Date(e.timestamp).toTimeString().slice(0, 5) : '08:00');
+  const entryType = inferEntryType(e);
   return {
     id: e.id || crypto.randomUUID(),
-    weight: Math.round(parseFloat(e.weight) * 100) / 100,
+    entryType,
+    weight: entryType === 'weight' ? parseWeight(e.weight) : null,
     date,
     time,
     period: e.period || derivePeriod(time),
-    meals: e.meals || { breakfast: '', lunch: '', dinner: '' },
+    waistSize: entryType === 'waist' ? parseWaistSize(e.waistSize) : null,
     timestamp: e.timestamp || buildTimestamp(date, time),
   };
 }
 
+function weightEntries() {
+  return entries.filter(i => i.entryType === 'weight' && i.weight != null);
+}
+
+function waistEntries() {
+  return entries.filter(i => i.entryType === 'waist' && i.waistSize != null);
+}
+
 /* ── 3. 云端同步核心引擎 (Neon DB 数据交互) ────────────────────────── */
+// Weight API: GET/POST /api/weight/get_weight | save_weight | delete_weight  → weight_logs
+// Waist API:  GET/POST /api/waist/get_waist   | save_waist   | delete_waist   → waist_logs
+
+const SYNC_CONFIG = {
+  weight: { api: WEIGHT_API, get: 'get_weight', save: 'save_weight', delete: 'delete_weight' },
+  waist:  { api: WAIST_API,  get: 'get_waist',  save: 'save_waist',  delete: 'delete_waist' },
+};
+
+function syncConfigFor(entry) {
+  return SYNC_CONFIG[entry?.entryType === 'waist' ? 'waist' : 'weight'];
+}
+
+function saveLocal() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+}
+
+async function fetchCloudLogs(kind) {
+  const cfg = SYNC_CONFIG[kind];
+  const res = await fetch(`${cfg.api}/${cfg.get}?username=${USERNAME}`);
+  if (!res.ok) throw new Error(`${kind} fetch failed: ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data.map(normalizeEntry);
+}
 
 async function syncFromCloud() {
+  let weightData = [];
+  let waistData = [];
+  let weightOk = false;
+  let waistOk = false;
+
   try {
-    // 加上 ?username=${USERNAME}
-    const res = await fetch(`${API_BASE}/get_weight?username=${USERNAME}`);
-    if (res.ok) {
-      const cloudData = await res.json();
-      if (Array.isArray(cloudData)) {
-        entries = cloudData.map(normalizeEntry);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-        renderAll();
-        console.log("☁️ Multidevice snapshot fetched from Neon rows.");
-        return;
-      }
-    }
+    weightData = await fetchCloudLogs('weight');
+    weightOk = true;
   } catch (err) {
-    console.warn("⚠️ Sync deferred. Running in local snapshot fallback mode:", err);
+    console.warn('⚠️ Weight cloud fetch failed:', err);
   }
+
+  try {
+    waistData = await fetchCloudLogs('waist');
+    waistOk = true;
+  } catch (err) {
+    console.warn('⚠️ Waist cloud fetch failed:', err);
+  }
+
+  if (weightOk || waistOk) {
+    const local = readLocalEntries();
+    const localWeight = local.filter(i => i.entryType === 'weight');
+    const localWaist = local.filter(i => i.entryType === 'waist');
+
+    entries = [
+      ...(weightOk ? weightData : localWeight),
+      ...(waistOk ? waistData : localWaist),
+    ];
+    saveLocal();
+    renderAll();
+    console.log(`☁️ Loaded ${weightOk ? weightData.length : localWeight.length} weight + ${waistOk ? waistData.length : localWaist.length} waist rows.`);
+    return;
+  }
+
+  console.warn('⚠️ Cloud unavailable. Using local backup.');
   loadLocalBackup();
 }
+
 async function syncSingleEntryToCloud(entry) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  saveLocal();
+  const cfg = syncConfigFor(entry);
   try {
-    await fetch(`${API_BASE}/save_weight`, {
+    const res = await fetch(`${cfg.api}/${cfg.save}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: USERNAME,
-        record: entry // 👈 完美契合后端的 payload.get('record') 逻辑
-      })
+      body: JSON.stringify({ username: USERNAME, record: entry }),
     });
-    console.log(`🚀 Incremental sync successful for ID: ${entry.id}`);
+    if (!res.ok) throw new Error(`${entry.entryType} save failed: ${res.status}`);
+    console.log(`🚀 Saved ${entry.entryType} to Neon: ${entry.id}`);
   } catch (err) {
-    console.warn("⚠️ Cached locally, offline update saved.", err);
+    console.warn(`⚠️ ${entry.entryType} saved locally only (offline):`, err);
   }
 }
 
-async function syncDeleteToCloud(id) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+async function syncDeleteToCloud(entry) {
+  saveLocal();
+  const cfg = syncConfigFor(entry);
   try {
-    await fetch(`${API_BASE}/delete_weight`, {
+    const res = await fetch(`${cfg.api}/${cfg.delete}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: id })
+      body: JSON.stringify({ id: entry.id }),
     });
-    console.log(`🗑️ Erased remote record ID: ${id}`);
+    if (!res.ok) throw new Error(`${entry.entryType} delete failed: ${res.status}`);
+    console.log(`🗑️ Deleted ${entry.entryType} from Neon: ${entry.id}`);
   } catch (err) {
-    console.warn("⚠️ Delete cached locally.", err);
+    console.warn(`⚠️ ${entry.entryType} delete saved locally only (offline):`, err);
   }
 }
-// 【推送】每次数据增删改，先存本地防丢，再异步推送到 Neon 云端
-async function persistEntries() {
-  // 1. 先安全地写入本地 LocalStorage
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-  
-  // 2. 异步向 Flask 后端发送全量同步请求
+
+async function syncAllEntriesToCloud() {
+  saveLocal();
+  const items = [...weightEntries(), ...waistEntries()];
+  if (!items.length) return;
+  await Promise.all(items.map((item) => syncSingleEntryToCloud(item)));
+  console.log(`🚀 Pushed ${items.length} entries to Neon (${weightEntries().length} weight, ${waistEntries().length} waist).`);
+}
+
+function readLocalEntries() {
   try {
-    const response = await fetch(`${API_BASE}/save_weight`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: USERNAME, data: entries })
-    });
-    if (response.ok) {
-      console.log("🚀 Data securely pushed and backed up to Neon Cloud.");
-    } else {
-      console.error("❌ Server rejected sync request.");
-    }
-  } catch (err) {
-    console.warn("⚠️ Cloud sync failed (offline mode). Local data is safe and will sync next time.", err);
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw).map(normalizeEntry) : [];
+  } catch {
+    return [];
   }
 }
 
 function loadLocalBackup() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    entries = raw ? JSON.parse(raw).map(normalizeEntry) : [];
-  } catch {
-    entries = [];
-  }
+  entries = readLocalEntries();
   renderAll();
 }
 
@@ -166,6 +226,7 @@ document.getElementById('themeToggle').addEventListener('click', () => {
   document.documentElement.classList.toggle('dark');
   localStorage.setItem('keepfit-theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
   renderChart();
+  renderWaistChart();
 });
 
 /* ── 5. 本地磁盘备份导入/导出 ──────────────────────────────────── */
@@ -205,12 +266,10 @@ document.getElementById('fileImportSelector').addEventListener('change', (e) => 
 
           // 🔥【核心修正】如果有新数据，并排同时发送请求，一条龙导入数据库
           if (newItemsToImport.length > 0) {
-            console.log(`📦 Starting batch import for ${newItemsToImport.length} items...`);
-            
-            // 使用 Promise.all 并发推送，速度极快
-            await Promise.all(newItemsToImport.map(item => syncSingleEntryToCloud(item)));
-            
-            console.log("✅ All imported items have been synced to Neon.");
+            saveLocal();
+            console.log(`📦 Importing ${newItemsToImport.length} items to Neon...`);
+            await Promise.all(newItemsToImport.map((item) => syncSingleEntryToCloud(item)));
+            console.log('✅ Imported items synced (weight → weight_logs, waist → waist_logs).');
           }
 
           renderAll();
@@ -237,61 +296,79 @@ function bmiLabel(bmi) {
 }
 
 /* ── 7. 数据表单提交操作（新增记录） ───────────────────────────── */
-document.getElementById('logForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const err = document.getElementById('formError');
-  const ok = document.getElementById('formSuccess');
-  err.classList.add('hidden'); ok.classList.add('hidden');
-
-  const rawW = document.getElementById('weight').value;
-  const w = Math.round(parseFloat(rawW) * 100) / 100;
-  const d = document.getElementById('entryDate').value;
-  const t = document.getElementById('entryTime').value;
-
-  if (!rawW.trim() || isNaN(w) || w <= 0) {
-    err.textContent = 'Enter a valid positive weight precision score.';
-    return err.classList.remove('hidden');
+function showFormMessage(errEl, okEl, errorText) {
+  errEl.classList.add('hidden');
+  okEl.classList.add('hidden');
+  if (errorText) {
+    errEl.textContent = errorText;
+    errEl.classList.remove('hidden');
+    return false;
   }
+  return true;
+}
 
-  // 1. 生成并格式化单条标准对象
-  const newEntry = normalizeEntry({
-    weight: w, date: d, time: t,
-    meals: {
-      breakfast: document.getElementById('breakfast').value.trim(),
-      lunch: document.getElementById('lunch').value.trim(),
-      dinner: document.getElementById('dinner').value.trim()
-    }
-  });
+function flashSuccess(okEl, message) {
+  okEl.textContent = message;
+  okEl.classList.remove('hidden');
+  setTimeout(() => okEl.classList.add('hidden'), 2500);
+}
 
-  // 2. 推入本地数组
+document.getElementById('logWeightForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('weightFormError');
+  const ok = document.getElementById('weightFormSuccess');
+  const rawW = document.getElementById('weight').value;
+  const w = parseWeight(rawW);
+  const d = document.getElementById('weightDate').value;
+  const t = document.getElementById('weightTime').value;
+
+  if (!showFormMessage(err, ok, !rawW.trim() || w == null ? 'Enter a valid positive weight.' : '')) return;
+
+  const newEntry = normalizeEntry({ entryType: 'weight', weight: w, date: d, time: t });
   entries.push(newEntry);
-
-  // 🔥【在这里调用】只同步当前这一条新增的数据到云端
+  saveLocal();
   await syncSingleEntryToCloud(newEntry);
-  
-  // 表单重置与视图更新
-  document.getElementById('weight').value = '';
-  document.getElementById('breakfast').value = '';
-  document.getElementById('lunch').value = '';
-  document.getElementById('dinner').value = '';
-  document.getElementById('entryDate').value = todayISO();
-  document.getElementById('entryTime').value = nowTime();
 
-  ok.textContent = 'Entry recorded successfully!';
-  ok.classList.remove('hidden');
-  setTimeout(() => ok.classList.add('hidden'), 2500);
+  document.getElementById('weight').value = '';
+  document.getElementById('weightDate').value = todayISO();
+  document.getElementById('weightTime').value = nowTime();
+  flashSuccess(ok, 'Weight recorded successfully!');
+  renderAll();
+});
+
+document.getElementById('logWaistForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('waistFormError');
+  const ok = document.getElementById('waistFormSuccess');
+  const rawWaist = document.getElementById('waistSize').value;
+  const waist = parseWaistSize(rawWaist);
+  const d = document.getElementById('waistDate').value;
+  const t = document.getElementById('waistTime').value;
+
+  if (!showFormMessage(err, ok, !rawWaist.trim() || waist == null ? 'Enter a valid positive waist size.' : '')) return;
+
+  const newEntry = normalizeEntry({ entryType: 'waist', waistSize: waist, date: d, time: t });
+  entries.push(newEntry);
+  saveLocal();
+  await syncSingleEntryToCloud(newEntry);
+
+  document.getElementById('waistSize').value = '';
+  document.getElementById('waistDate').value = todayISO();
+  document.getElementById('waistTime').value = nowTime();
+  flashSuccess(ok, 'Waist size recorded successfully!');
   renderAll();
 });
 
 // 删除条目
 window.deleteEntry = async function(id) {
   if (!confirm('Delete entry permanently?')) return;
-  
+
+  const removed = entries.find(i => i.id === id);
   entries = entries.filter(i => i.id !== id);
-  
-  // 🔥【在这里调用】通知后端根据这个 ID 执行物理行 DELETE
-  await syncDeleteToCloud(id);
-  
+  saveLocal();
+
+  if (removed) await syncDeleteToCloud(removed);
+
   renderAll();
 };
 
@@ -307,37 +384,39 @@ window.cancelEdit = function() {
 };
 
 window.saveEdit = async function(id) {
-  const weightInput = document.getElementById(`editW_${id}`).value;
+  const item = entries.find(i => i.id === id);
+  if (!item) return;
+
   const dateInput = document.getElementById(`editD_${id}`).value;
   const timeInput = document.getElementById(`editT_${id}`).value;
-  
-  const w = Math.round(parseFloat(weightInput) * 100) / 100;
-  if (isNaN(w) || w <= 0) return alert('Please enter a valid weight.');
-
   let updatedItem = null;
 
-  entries = entries.map(item => {
-    if (item.id === id) {
-      updatedItem = normalizeEntry({
-        id: item.id,
-        weight: w,
-        date: dateInput,
-        time: timeInput,
-        meals: {
-          breakfast: document.getElementById(`editB_${id}`).value.trim(),
-          lunch: document.getElementById(`editL_${id}`).value.trim(),
-          dinner: document.getElementById(`editDin_${id}`).value.trim()
-        }
-      });
-      return updatedItem;
-    }
-    return item;
-  });
-
-  // 🔥【在这里调用】编辑保存后，把被修改的这一条单独发送 Upsert 给后端
-  if (updatedItem) {
-    await syncSingleEntryToCloud(updatedItem);
+  if (item.entryType === 'waist') {
+    const waist = parseWaistSize(document.getElementById(`editWaist_${id}`).value);
+    if (waist == null) return alert('Please enter a valid waist size.');
+    updatedItem = normalizeEntry({
+      id: item.id,
+      entryType: 'waist',
+      waistSize: waist,
+      date: dateInput,
+      time: timeInput,
+    });
+  } else {
+    const w = parseWeight(document.getElementById(`editW_${id}`).value);
+    if (w == null) return alert('Please enter a valid weight.');
+    updatedItem = normalizeEntry({
+      id: item.id,
+      entryType: 'weight',
+      weight: w,
+      date: dateInput,
+      time: timeInput,
+    });
   }
+
+  entries = entries.map(entry => entry.id === id ? updatedItem : entry);
+  saveLocal();
+
+  if (updatedItem) await syncSingleEntryToCloud(updatedItem);
 
   window.editingId = null;
   renderAll();
@@ -345,14 +424,15 @@ window.saveEdit = async function(id) {
 
 /* ── 9. 数据渲染引擎 (Stats / History / Chart) ────────────────── */
 function renderStats() {
-  if (!entries.length) {
+  const weights = weightEntries();
+  if (!weights.length) {
     ['statLatest','statBmi','statAvg','statChange'].forEach(id => document.getElementById(id).textContent = '—');
     document.getElementById('statLatestMeta').textContent = '';
     document.getElementById('statBmiLabel').textContent = '';
     return;
   }
-  const sorted = [...entries].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-  const first = [...entries].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))[0];
+  const sorted = [...weights].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const first = [...weights].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))[0];
   const latest = sorted[0];
   const bmi = calcBmi(latest.weight);
 
@@ -361,7 +441,7 @@ function renderStats() {
   document.getElementById('statBmi').textContent = bmi.toFixed(1);
   document.getElementById('statBmiLabel').textContent = bmiLabel(bmi);
 
-  const recent = entries.filter(i => new Date(i.timestamp) >= (Date.now() - 7 * 86400000));
+  const recent = weights.filter(i => new Date(i.timestamp) >= (Date.now() - 7 * 86400000));
   const avg = recent.length ? recent.reduce((s,i) => s + i.weight, 0) / recent.length : latest.weight;
   document.getElementById('statAvg').textContent = `${formatWeight(avg)} kg`;
 
@@ -381,14 +461,21 @@ function renderHistory() {
     const p = PERIOD_STYLE[i.period];
     
     if (window.editingId === i.id) {
+      const valueField = i.entryType === 'waist'
+        ? `<div>
+            <label class="block text-[10px] text-slate-400">Waist size (cm)</label>
+            <input id="editWaist_${i.id}" type="number" step="0.1" min="0" value="${i.waistSize ?? ''}" class="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 text-sm font-semibold" />
+          </div>`
+        : `<div>
+            <label class="block text-[10px] text-slate-400">Weight (kg)</label>
+            <input id="editW_${i.id}" type="number" step="0.01" value="${i.weight ?? ''}" class="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 text-sm font-semibold" />
+          </div>`;
+
       return `
         <li class="py-4 bg-slate-50/50 dark:bg-slate-800/30 rounded-xl px-3 my-2 ring-1 ring-slate-200/50 dark:ring-slate-700/30">
           <div class="space-y-3">
             <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-[10px] text-slate-400">Weight (kg)</label>
-                <input id="editW_${i.id}" type="number" step="0.01" value="${i.weight}" class="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 text-sm font-semibold" />
-              </div>
+              ${valueField}
               <div class="grid grid-cols-2 gap-1">
                 <div>
                   <label class="block text-[10px] text-slate-400">Date</label>
@@ -400,17 +487,6 @@ function renderHistory() {
                 </div>
               </div>
             </div>
-            <div class="grid grid-cols-3 gap-2">
-              <div>
-                <input id="editB_${i.id}" type="text" value="${i.meals?.breakfast || ''}" placeholder="Breakfast" class="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 text-xs" />
-              </div>
-              <div>
-                <input id="editL_${i.id}" type="text" value="${i.meals?.lunch || ''}" placeholder="Lunch" class="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 text-xs" />
-              </div>
-              <div>
-                <input id="editDin_${i.id}" type="text" value="${i.meals?.dinner || ''}" placeholder="Dinner" class="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 text-xs" />
-              </div>
-            </div>
             <div class="flex justify-end gap-2 text-xs pt-1">
               <button onclick="cancelEdit()" class="px-2.5 py-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-md transition">Cancel</button>
               <button onclick="saveEdit('${i.id}')" class="px-3 py-1 bg-brand-500 text-white font-medium rounded-md hover:bg-brand-600 shadow-sm transition">Save</button>
@@ -419,16 +495,19 @@ function renderHistory() {
         </li>`;
     }
 
+    const isWaist = i.entryType === 'waist';
+    const emoji = isWaist ? '📏' : p.emoji;
+    const title = isWaist
+      ? `${formatWeight(i.waistSize)} cm <span class="ml-1 text-xs font-normal text-violet-500">Waist</span>`
+      : `${formatWeight(i.weight)} kg <span class="ml-1 text-xs font-normal text-slate-400">BMI ${calcBmi(i.weight).toFixed(1)}</span>`;
+
     return `
       <li class="flex items-start justify-between gap-3 py-3 group">
         <div class="flex items-start gap-3 min-w-0">
-          <span class="text-lg mt-0.5">${p.emoji}</span>
+          <span class="text-lg mt-0.5">${emoji}</span>
           <div class="min-w-0">
-            <p class="font-semibold text-slate-900 dark:text-white">${formatWeight(i.weight)} kg
-              <span class="ml-1 text-xs font-normal text-slate-400">BMI ${calcBmi(i.weight).toFixed(1)}</span>
-            </p>
+            <p class="font-semibold text-slate-900 dark:text-white">${title}</p>
             <p class="text-xs text-slate-400">${i.date} · ${i.time} · ${p.label}</p>
-            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">${mealSummary(i.meals)}</p>
           </div>
         </div>
         <div class="shrink-0 flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
@@ -439,35 +518,37 @@ function renderHistory() {
   }).join('');
 }
 
-function renderChart() {
-  const canvas = document.getElementById('weightChart');
-  const empty = document.getElementById('chartEmpty');
-  const isDark = document.documentElement.classList.contains('dark');
-  const gridColor = isDark ? 'rgba(148,163,184,0.15)' : 'rgba(148,163,184,0.3)';
-  const textColor = isDark ? '#94a3b8' : '#64748b';
-
-  const filtered = [...entries].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp)).filter(i => {
+function filterByRange(items) {
+  return items.filter(i => {
     if (activeRange === 'all') return true;
     return new Date(i.timestamp) >= (Date.now() - parseInt(activeRange) * 86400000);
   });
+}
 
-  if (!filtered.length) {
-    canvas.classList.add('hidden'); empty.classList.remove('hidden');
-    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-    return;
+function chartTheme() {
+  const isDark = document.documentElement.classList.contains('dark');
+  return {
+    gridColor: isDark ? 'rgba(148,163,184,0.15)' : 'rgba(148,163,184,0.3)',
+    textColor: isDark ? '#94a3b8' : '#64748b',
+  };
+}
+
+function buildLineChart(canvas, instance, labels, datasets, emptyEl) {
+  const { gridColor, textColor } = chartTheme();
+
+  if (!labels.length) {
+    canvas.classList.add('hidden');
+    emptyEl.classList.remove('hidden');
+    if (instance.current) { instance.current.destroy(); instance.current = null; }
+    return null;
   }
-  canvas.classList.remove('hidden'); empty.classList.add('hidden');
+  canvas.classList.remove('hidden');
+  emptyEl.classList.add('hidden');
 
-  if (chartInstance) chartInstance.destroy();
-  chartInstance = new Chart(canvas, {
+  if (instance.current) instance.current.destroy();
+  instance.current = new Chart(canvas, {
     type: 'line',
-    data: {
-      labels: filtered.map(i => `${i.date.slice(5)} ${i.time}`),
-      datasets: [
-        { label: 'Morning', data: filtered.map(i => i.period === 'morning' ? i.weight : null), borderColor: '#10b981', spanGaps: true, borderWidth: 2.5, tension: 0.3 },
-        { label: 'Evening', data: filtered.map(i => i.period === 'evening' ? i.weight : null), borderColor: '#8b5cf6', spanGaps: true, borderWidth: 2.5, tension: 0.3 }
-      ]
-    },
+    data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: textColor } } },
@@ -477,25 +558,68 @@ function renderChart() {
       }
     }
   });
+  return instance.current;
+}
+
+function renderChart() {
+  const sorted = [...weightEntries()].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const filtered = filterByRange(sorted);
+  const labels = filtered.map(i => `${i.date.slice(5)} ${i.time}`);
+  const datasets = [
+    { label: 'Morning', data: filtered.map(i => i.period === 'morning' ? i.weight : null), borderColor: '#10b981', spanGaps: true, borderWidth: 2.5, tension: 0.3 },
+    { label: 'Evening', data: filtered.map(i => i.period === 'evening' ? i.weight : null), borderColor: '#8b5cf6', spanGaps: true, borderWidth: 2.5, tension: 0.3 }
+  ];
+  chartInstance = buildLineChart(
+    document.getElementById('weightChart'),
+    { current: chartInstance },
+    labels,
+    datasets,
+    document.getElementById('chartEmpty')
+  );
+}
+
+function renderWaistChart() {
+  const sorted = [...waistEntries()].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const filtered = filterByRange(sorted);
+  const labels = filtered.map(i => `${i.date.slice(5)} ${i.time}`);
+  const datasets = [
+    { label: 'Morning', data: filtered.map(i => i.period === 'morning' ? i.waistSize : null), borderColor: '#10b981', spanGaps: true, borderWidth: 2.5, tension: 0.3 },
+    { label: 'Evening', data: filtered.map(i => i.period === 'evening' ? i.waistSize : null), borderColor: '#8b5cf6', spanGaps: true, borderWidth: 2.5, tension: 0.3 }
+  ];
+  waistChartInstance = buildLineChart(
+    document.getElementById('waistChart'),
+    { current: waistChartInstance },
+    labels,
+    datasets,
+    document.getElementById('waistChartEmpty')
+  );
 }
 
 /* ── 10. 趋势图筛选控制 ────────────────────────────────── */
+function updateRangeButtons() {
+  document.querySelectorAll('.range-btn').forEach(b => {
+    const selected = b.dataset.range === String(activeRange);
+    b.className = `range-btn rounded-lg px-3 py-1 text-xs font-medium transition ${selected ? 'bg-brand-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`;
+  });
+}
+
 document.querySelectorAll('.range-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     activeRange = btn.dataset.range;
-    document.querySelectorAll('.range-btn').forEach(b => {
-      b.className = `range-btn rounded-lg px-3 py-1 text-xs font-medium transition ${b === btn ? 'bg-brand-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`;
-    });
+    updateRangeButtons();
     renderChart();
+    renderWaistChart();
   });
 });
 
-function renderAll() { renderStats(); renderHistory(); renderChart(); }
+function renderAll() { renderStats(); renderHistory(); renderChart(); renderWaistChart(); }
 
 /* ── 11. 初始化启动入口 ────────────────────────────────── */
 initSettings();
-document.getElementById('entryDate').value = todayISO();
-document.getElementById('entryTime').value = nowTime();
+document.getElementById('weightDate').value = todayISO();
+document.getElementById('weightTime').value = nowTime();
+document.getElementById('waistDate').value = todayISO();
+document.getElementById('waistTime').value = nowTime();
 
-// 执行首次云端全量数据拉取与多端同步
+// 启动：先从 Neon 拉取 weight_logs + waist_logs，再渲染界面
 syncFromCloud();

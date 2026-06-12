@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Keep Fit — Weight Tracker</title>
+  <title>Keep Fit — Weight &amp; Waist Tracker</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -31,7 +31,7 @@
       <div>
         <p class="text-sm font-medium text-brand-600 dark:text-brand-400 tracking-wide uppercase">Personal Tracker</p>
         <h1 class="mt-1 text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Keep Fit</h1>
-        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Weight, meals &amp; trends · offline · private</p>
+        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Weight, waist size &amp; trends · offline · private</p>
       </div>
       
       <div class="flex items-center gap-2">
@@ -85,49 +85,57 @@
       </div>
     </div>
 
-    <section class="glass mb-6 rounded-2xl p-6 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
-      <h2 class="mb-4 text-base font-semibold text-slate-900 dark:text-white">Log Weight</h2>
-      <form id="logForm" class="space-y-4">
-        <div class="grid gap-4 sm:grid-cols-3">
-          <div>
-            <label for="entryDate" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Date</label>
-            <input id="entryDate" type="date" required class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+    <div class="mb-6 grid gap-6 lg:grid-cols-2">
+      <section class="glass rounded-2xl p-6 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+        <h2 class="mb-4 text-base font-semibold text-slate-900 dark:text-white">Log Weight</h2>
+        <form id="logWeightForm" class="space-y-4">
+          <div class="grid gap-4 sm:grid-cols-3">
+            <div>
+              <label for="weightDate" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Date</label>
+              <input id="weightDate" type="date" required class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+            </div>
+            <div>
+              <label for="weightTime" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Time</label>
+              <input id="weightTime" type="time" required class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+            </div>
+            <div>
+              <label for="weight" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Weight (kg)</label>
+              <input id="weight" type="number" step="0.01" min="0" required placeholder="e.g. 68.55" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm font-semibold focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+            </div>
           </div>
-          <div>
-            <label for="entryTime" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Time</label>
-            <input id="entryTime" type="time" required class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+          <div class="flex justify-end">
+            <button type="submit" class="rounded-xl bg-gradient-to-r from-brand-500 to-emerald-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40 hover:from-brand-600 hover:to-emerald-700 transition-all active:scale-95">Save Weight</button>
           </div>
-          <div>
-            <label for="weight" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Weight (kg)</label>
-            <input id="weight" type="number" step="0.01" min="0" required placeholder="e.g. 68.55" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm font-semibold focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
-          </div>
-        </div>
+          <p id="weightFormError" class="hidden text-sm text-red-500"></p>
+          <p id="weightFormSuccess" class="hidden text-sm text-brand-600 dark:text-brand-400"></p>
+        </form>
+      </section>
 
-        <div>
-          <p class="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">What I ate</p>
-          <div class="grid gap-3 sm:grid-cols-3">
+      <section class="glass rounded-2xl p-6 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+        <h2 class="mb-4 text-base font-semibold text-slate-900 dark:text-white">Log Waist Size</h2>
+        <form id="logWaistForm" class="space-y-4">
+          <div class="grid gap-4 sm:grid-cols-3">
             <div>
-              <label for="breakfast" class="mb-1 block text-xs text-slate-400">Breakfast</label>
-              <input id="breakfast" type="text" placeholder="e.g. oatmeal, egg" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+              <label for="waistDate" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Date</label>
+              <input id="waistDate" type="date" required class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
             </div>
             <div>
-              <label for="lunch" class="mb-1 block text-xs text-slate-400">Lunch</label>
-              <input id="lunch" type="text" placeholder="e.g. salad, chicken" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+              <label for="waistTime" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Time</label>
+              <input id="waistTime" type="time" required class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
             </div>
             <div>
-              <label for="dinner" class="mb-1 block text-xs text-slate-400">Dinner</label>
-              <input id="dinner" type="text" placeholder="e.g. rice, fish" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
+              <label for="waistSize" class="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Waist size (cm)</label>
+              <input id="waistSize" type="number" step="0.1" min="0" required placeholder="e.g. 75" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm font-semibold focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition" />
             </div>
           </div>
-        </div>
-
-        <div class="flex justify-end">
-          <button type="submit" class="rounded-xl bg-gradient-to-r from-brand-500 to-emerald-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40 hover:from-brand-600 hover:to-emerald-700 transition-all active:scale-95">Save Entry</button>
-        </div>
-        <p id="formError" class="hidden text-sm text-red-500"></p>
-        <p id="formSuccess" class="hidden text-sm text-brand-600 dark:text-brand-400"></p>
-      </form>
-    </section>
+          <div class="flex justify-end">
+            <button type="submit" class="rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-600 hover:to-purple-700 transition-all active:scale-95">Save Waist</button>
+          </div>
+          <p id="waistFormError" class="hidden text-sm text-red-500"></p>
+          <p id="waistFormSuccess" class="hidden text-sm text-violet-600 dark:text-violet-400"></p>
+        </form>
+      </section>
+    </div>
 
     <section class="glass mb-6 rounded-2xl p-6 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
       <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -144,13 +152,28 @@
       </div>
     </section>
 
+    <section class="glass mb-6 rounded-2xl p-6 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-base font-semibold text-slate-900 dark:text-white">Waist Size Trend</h2>
+        <div class="flex gap-1.5">
+          <button data-range="7" class="range-btn rounded-lg px-3 py-1 text-xs font-medium bg-brand-500 text-white">7d</button>
+          <button data-range="30" class="range-btn rounded-lg px-3 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">30d</button>
+          <button data-range="all" class="range-btn rounded-lg px-3 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">All</button>
+        </div>
+      </div>
+      <div class="relative h-64 sm:h-72">
+        <canvas id="waistChart"></canvas>
+        <div id="waistChartEmpty" class="absolute inset-0 flex items-center justify-center text-sm text-slate-400 hidden">No waist size data yet — log your waist size above.</div>
+      </div>
+    </section>
+
     <section class="glass rounded-2xl p-6 shadow-sm ring-1 ring-slate-200/60 dark:ring-slate-700/60">
       <h2 class="mb-4 text-base font-semibold text-slate-900 dark:text-white">History</h2>
       <ul id="historyList" class="divide-y divide-slate-100 dark:divide-slate-700/60"></ul>
       <p id="historyEmpty" class="py-6 text-center text-sm text-slate-400">No entries recorded.</p>
     </section>
 
-    <footer class="mt-8 text-center text-xs text-slate-400 dark:text-slate-500">Data stored securely and locally in your browser · Offline Ready</footer>
+    <footer class="mt-8 text-center text-xs text-slate-400 dark:text-slate-500">Weight &amp; waist synced to cloud · local backup in your browser · offline ready</footer>
   </div>
 
   <script src="app.js"></script>
